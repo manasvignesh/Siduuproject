@@ -17,7 +17,7 @@ export async function getDb() {
         idle_timeout: 15,
         connect_timeout: 5,
         prepare: false,
-        ssl: "require",
+        ssl: { rejectUnauthorized: false },
       });
       _db = drizzle(_client);
     } catch (error) {

@@ -50,7 +50,8 @@ app.get("/api/health", async (_req, res) => {
       server: true,
       database: true,
     });
-  } catch {
+  } catch (error) {
+    console.error("[Health Check Error]:", error);
     return res.status(503).json({
       status: "degraded",
       server: true,
@@ -74,11 +75,17 @@ app.use(
     router: appRouter,
     createContext,
     onError({ error, path }) {
-      console.error(`[tRPC Error on ${path}]:`, error);
+      console.error(`[tRPC Serverless Error on path '${path}']:`, error);
     },
   })
 );
 
-export default function handler(req: any, res: any) {
-  return app(req, res);
-}
+// Fallback error handler
+app.use((err: any, _req: any, res: any, _next: any) => {
+  console.error("[Serverless Unhandled Error]:", err);
+  res.status(500).json({
+    error: err?.message || "Internal Server Error",
+  });
+});
+
+export default app;
