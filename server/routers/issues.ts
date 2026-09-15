@@ -76,6 +76,61 @@ export const issuesRouter = router({
     return candidates.filter(item => withinDuplicateRadius(input.lat, input.lng, item.latitude, item.longitude)).sort((a, b) => b.upvoteCount - a.upvoteCount);
   }),
 
+  all: publicProcedure.input(z.object({
+    statuses: z.array(issueStatus).optional(),
+    categories: z.array(categorySlug).optional(),
+    departmentId: z.number().int().positive().optional(),
+    lat: z.number().optional(),
+    lng: z.number().optional(),
+    radiusKm: z.number().positive().max(50).default(10),
+    sort: z.enum(["newest", "most_upvoted", "priority"]).default("newest"),
+    limit: z.number().int().min(1).max(100).default(50),
+    offset: z.number().int().min(0).default(0),
+  }).default({ radiusKm: 10, sort: "newest", limit: 50, offset: 0 })).query(async ({ input }) => {
+    const db = await getDb();
+    if (!db) {
+      let items = [...mockDb.getIssues()];
+      if (input.statuses?.length) {
+        items = items.filter(i => input.statuses!.includes(i.status));
+      }
+      if (input.categories?.length) {
+        items = items.filter(i => input.categories!.includes(i.categorySlug as any));
+      }
+      if (input.departmentId) {
+        items = items.filter(i => i.departmentId === input.departmentId);
+      }
+      if (input.sort === "most_upvoted") {
+        items.sort((a, b) => b.upvoteCount - a.upvoteCount);
+      } else if (input.sort === "priority") {
+        const pOrder: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1 };
+        items.sort((a, b) => (pOrder[b.priority] || 0) - (pOrder[a.priority] || 0));
+      } else {
+        items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      }
+      const paginated = items.slice(input.offset, input.offset + input.limit);
+      return { items: paginated, total: items.length, offset: input.offset, limit: input.limit };
+    }
+    const filters = [];
+    if (input.statuses?.length) filters.push(inArray(issues.status, input.statuses));
+    if (input.categories?.length) filters.push(inArray(issues.categorySlug, input.categories));
+    if (input.departmentId) filters.push(eq(issues.departmentId, input.departmentId));
+    if (input.lat !== undefined && input.lng !== undefined) {
+      const delta = input.radiusKm / 111;
+      filters.push(gte(issues.latitude, input.lat - delta), lte(issues.latitude, input.lat + delta), gte(issues.longitude, input.lng - delta), lte(issues.longitude, input.lng + delta));
+    }
+    const orderBy = input.sort === "most_upvoted"
+      ? desc(issues.upvoteCount)
+      : input.sort === "priority"
+      ? desc(sql`CASE WHEN ${issues.priority} = 'urgent' THEN 4 WHEN ${issues.priority} = 'high' THEN 3 WHEN ${issues.priority} = 'medium' THEN 2 ELSE 1 END`)
+      : desc(issues.createdAt);
+    const where = filters.length ? and(...filters) : undefined;
+    const [items, totalRows] = await Promise.all([
+      db.select().from(issues).where(where).orderBy(orderBy).limit(input.limit).offset(input.offset),
+      db.select({ value: count() }).from(issues).where(where),
+    ]);
+    return { items, total: totalRows[0]?.value ?? 0, offset: input.offset, limit: input.limit };
+  }),
+
   list: publicProcedure.input(z.object({
     statuses: z.array(issueStatus).optional(),
     categories: z.array(categorySlug).optional(),
