@@ -51,7 +51,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     };
     const updateSet: Record<string, unknown> = {};
 
-    const textFields = ["name", "email", "loginMethod"] as const;
+    const textFields = ["name", "email", "loginMethod", "passwordHash"] as const;
     type TextField = (typeof textFields)[number];
 
     const assignNullable = (field: TextField) => {
@@ -120,6 +120,34 @@ export async function getUserByOpenId(openId: string) {
     return result.length > 0 ? result[0] : undefined;
   } catch (error) {
     console.warn("[Database] getUserByOpenId error:", error);
+    return undefined;
+  }
+}
+
+export async function getUserByEmail(email: string) {
+  let db: ReturnType<typeof drizzle> | null = null;
+  try {
+    db = await getDb();
+  } catch (err) {
+    console.warn("[Database] getDb error:", err);
+    return undefined;
+  }
+
+  if (!db) {
+    console.warn("[Database] Cannot get user: database not available");
+    return undefined;
+  }
+
+  try {
+    const result = await db
+      .select()
+      .from(users)
+      .where(eq(users.email, email.toLowerCase().trim()))
+      .limit(1);
+
+    return result.length > 0 ? result[0] : undefined;
+  } catch (error) {
+    console.warn("[Database] getUserByEmail error:", error);
     return undefined;
   }
 }

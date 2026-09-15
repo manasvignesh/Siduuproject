@@ -1,8 +1,28 @@
 import "dotenv/config";
 import { eq } from "drizzle-orm";
-import { departments, issues, issueStatusHistory } from "./schema";
+import { departments, issues, issueStatusHistory, users } from "./schema";
 import { defaultDepartments } from "../server/routers/issues";
 import { getDb } from "../server/db";
+import { hashPassword } from "../server/_core/authUtils";
+
+const demoUsers = [
+  {
+    openId: "admin-01",
+    name: "Operations Administrator",
+    email: "admin@gmail.com",
+    role: "admin" as const,
+    loginMethod: "local",
+    password: "123456",
+  },
+  {
+    openId: "user-01",
+    name: "Citizen User",
+    email: "user@gmail.com",
+    role: "user" as const,
+    loginMethod: "local",
+    password: "123456",
+  },
+];
 
 const samples = [
   { code: "CC-2026-000101", categorySlug: "pothole", title: "Large pothole near Miyapur junction", description: "A deep pothole is affecting the left lane and is difficult to see after dark.", status: "in_progress" as const, priority: "high" as const, latitude: 17.4968, longitude: 78.3565, address: "Miyapur Main Road, Hyderabad", upvoteCount: 82, departmentSlug: "roads-transport" },
@@ -15,9 +35,36 @@ const samples = [
 
 async function seed() {
   const db = await getDb();
-  if (!db) throw new Error("DATABASE_URL is not configured");
-  const departmentIds = new Map<string, number>();
+  if (!db) throw new Error("DATABASE_URL is not configured or reachable");
 
+  console.log("[Seed] Seeding demo users with hashed passwords...");
+  for (const u of demoUsers) {
+    const passwordHash = hashPassword(u.password);
+    await db
+      .insert(users)
+      .values({
+        openId: u.openId,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        loginMethod: u.loginMethod,
+        passwordHash,
+        lastSignedIn: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: users.openId,
+        set: {
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          passwordHash,
+          lastSignedIn: new Date(),
+        },
+      });
+  }
+
+  console.log("[Seed] Seeding municipal departments...");
+  const departmentIds = new Map<string, number>();
   for (const department of defaultDepartments) {
     const existing = await db.select().from(departments).where(eq(departments.slug, department.slug)).limit(1);
     if (existing[0]) {
@@ -28,6 +75,7 @@ async function seed() {
     if (inserted[0]?.id) departmentIds.set(department.slug, inserted[0].id);
   }
 
+  console.log("[Seed] Seeding sample civic issues...");
   for (const sample of samples) {
     const existing = await db.select({ id: issues.id }).from(issues).where(eq(issues.referenceCode, sample.code)).limit(1);
     if (existing[0]) continue;
@@ -58,7 +106,7 @@ async function seed() {
     }
   }
 
-  console.log(`Seeded ${defaultDepartments.length} departments and ${samples.length} sample issues to Supabase.`);
+  console.log(`Successfully seeded ${demoUsers.length} users, ${defaultDepartments.length} departments, and ${samples.length} sample issues.`);
   process.exit(0);
 }
 

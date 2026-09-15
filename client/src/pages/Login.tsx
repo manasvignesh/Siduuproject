@@ -43,10 +43,31 @@ export default function Login() {
       toast.success(`Welcome back, ${data.user.name || data.user.email}!`);
       setLocation("/");
     },
-    onError: (err) => {
-      let msg = err.message || "Failed to sign in. Please verify credentials.";
-      if (msg.includes("is not valid JSON") || msg.includes("Unexpected token") || msg.includes("A server e")) {
-        msg = "Server API endpoint is initializing. Please check that database/server is online and retry.";
+    onError: async (err) => {
+      let msg = err.message || "Failed to sign in.";
+      
+      if (
+        msg.includes("JSON") ||
+        msg.includes("Failed to fetch") ||
+        msg.includes("NetworkError") ||
+        msg.includes("Unexpected token") ||
+        msg.includes("A server e")
+      ) {
+        try {
+          const healthRes = await fetch("/api/health");
+          if (!healthRes.ok) {
+            const data = await healthRes.json().catch(() => ({}));
+            if (data?.database === false) {
+              msg = "Database is currently unavailable. Please verify database connection.";
+            } else {
+              msg = `Backend server is unavailable (HTTP ${healthRes.status}).`;
+            }
+          } else {
+            msg = "Authentication service connection error. Please retry.";
+          }
+        } catch {
+          msg = "Backend server is offline or unreachable.";
+        }
       }
       setErrorMessage(msg);
       toast.error(msg);

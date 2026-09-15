@@ -3,9 +3,10 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { sdk } from "./_core/sdk";
+import { hashPassword, verifyPassword } from "./_core/authUtils";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
-import { upsertUser, getUserByOpenId } from "./db";
+import { upsertUser, getUserByEmail, getUserByOpenId } from "./db";
 import { departmentsRouter } from "./routers/departments";
 import { issuesRouter } from "./routers/issues";
 import { notificationsRouter } from "./routers/notifications";
@@ -27,53 +28,75 @@ export const appRouter = router({
         const email = input.email.toLowerCase().trim();
         const password = input.password.trim();
 
-        // Validate credentials (default test password is 123456)
-        if (password !== "123456" && password.length < 4) {
-          throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: "Invalid password. Default testing password is '123456'.",
-          });
-        }
+        // 1. Look up user in database
+        let dbUser = await getUserByEmail(email);
 
         let role: "user" | "admin" = "user";
         let openId = "";
         let name = "";
+        let userId = 1;
 
-        if (email === "admin@gmail.com") {
-          role = "admin";
-          openId = "admin-01";
-          name = "Operations Administrator";
-        } else if (email === "user@gmail.com") {
-          role = "user";
-          openId = "user-01";
-          name = "Citizen User";
+        if (dbUser) {
+          // Verify real password hash from DB
+          const isValid = verifyPassword(password, dbUser.passwordHash);
+          if (!isValid) {
+            throw new TRPCError({
+              code: "UNAUTHORIZED",
+              message: "Incorrect password. For demo accounts, use password '123456'.",
+            });
+          }
+          role = dbUser.role;
+          openId = dbUser.openId;
+          name = dbUser.name || email.split("@")[0];
+          userId = dbUser.id;
+
+          // Update lastSignedIn
+          await upsertUser({
+            openId,
+            lastSignedIn: new Date(),
+          });
         } else {
-          role = input.role || (email.includes("admin") ? "admin" : "user");
-          const hex = Buffer.from(email).toString("hex").slice(0, 16);
-          openId = `usr_${hex}`;
-          name = email.split("@")[0].replace(/[._-]/g, " ");
+          // If not yet in DB, check fallback demo credentials or create user
+          if (email === "admin@gmail.com") {
+            role = "admin";
+            openId = "admin-01";
+            name = "Operations Administrator";
+          } else if (email === "user@gmail.com") {
+            role = "user";
+            openId = "user-01";
+            name = "Citizen User";
+          } else {
+            role = input.role || (email.includes("admin") ? "admin" : "user");
+            const hex = Buffer.from(email).toString("hex").slice(0, 16);
+            openId = `usr_${hex}`;
+            name = email.split("@")[0].replace(/[._-]/g, " ");
+          }
+
+          if (password !== "123456" && password.length < 6) {
+            throw new TRPCError({
+              code: "UNAUTHORIZED",
+              message: "Incorrect credentials. Use password '123456' for test accounts.",
+            });
+          }
+
+          const passwordHash = hashPassword(password);
+          await upsertUser({
+            openId,
+            name,
+            email,
+            role,
+            loginMethod: "local",
+            passwordHash,
+            lastSignedIn: new Date(),
+          });
+
+          const created = await getUserByEmail(email);
+          if (created) {
+            userId = created.id;
+          }
         }
 
-        // Upsert user in Postgres DB safely with timeout guard
-        try {
-          await Promise.race([
-            upsertUser({
-              openId,
-              name,
-              email,
-              role,
-              loginMethod: "local",
-              lastSignedIn: new Date(),
-            }),
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error("DB upsert timeout")), 1500)
-            ),
-          ]);
-        } catch (error) {
-          console.warn("[Auth Login] Database upsert warning:", error);
-        }
-
-        // Generate JWT session token
+        // 2. Generate JWT session token
         const token = await sdk.signSession({
           openId,
           appId: "citycare",
@@ -82,7 +105,7 @@ export const appRouter = router({
           role,
         });
 
-        // Set session cookie
+        // 3. Set session cookie
         const cookieOptions = getSessionCookieOptions(ctx.req);
         ctx.res.cookie(COOKIE_NAME, token, {
           ...cookieOptions,
@@ -90,14 +113,14 @@ export const appRouter = router({
         });
 
         const loggedInUser = {
-          id: openId === "admin-01" ? 1 : 2,
+          id: userId,
           openId,
           name,
           email,
           role,
           loginMethod: "local",
           lastSignedIn: new Date(),
-          createdAt: new Date(),
+          createdAt: dbUser?.createdAt || new Date(),
           updatedAt: new Date(),
         };
 
