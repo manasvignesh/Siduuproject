@@ -15,24 +15,8 @@ export async function createContext(
 
   try {
     user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
-    // Authentication is optional for public procedures.
+  } catch {
     user = null;
-  }
-
-  // Provide fallback demo citizen & admin session in development
-  if (!user) {
-    user = {
-      id: 1,
-      openId: "demo-citizen-01",
-      name: "Community Member",
-      email: "citizen@citycare.local",
-      role: "admin",
-      loginMethod: "local",
-      lastSignedIn: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } as User;
   }
 
   return {

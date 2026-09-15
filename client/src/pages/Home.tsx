@@ -34,9 +34,14 @@ import {
   Users,
   Wrench,
   X,
+  LogOut,
+  Shield,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { InteractiveCivicMap, type MapPinItem } from "@/components/Map";
+import { useLocation } from "wouter";
+import { toast } from "sonner";
+import Login from "./Login";
 
 type Mode = "citizen" | "admin";
 type CitizenTab = "home" | "map" | "my_reports" | "resolved" | "info";
@@ -107,13 +112,22 @@ function Header({
   mode,
   setMode,
   onReport,
+  user,
+  onLogout,
   unreadCount = 2,
 }: {
   mode: Mode;
   setMode: (m: Mode) => void;
   onReport: () => void;
+  user: any;
+  onLogout: () => void;
   unreadCount?: number;
 }) {
+  const isAdmin = user?.role === "admin";
+  const userInitials = user?.name
+    ? user.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()
+    : (isAdmin ? "AD" : "CU");
+
   return (
     <header className="topbar">
       <Brand />
@@ -129,13 +143,20 @@ function Header({
         <button
           type="button"
           className={mode === "admin" ? "active" : ""}
-          onClick={() => setMode("admin")}
+          onClick={() => {
+            if (!isAdmin) {
+              toast.error("Operations Console is restricted to Admin personnel (admin@gmail.com).");
+              return;
+            }
+            setMode("admin");
+          }}
         >
           <Wrench size={15} /> Operations Console
+          {!isAdmin && <span className="text-[10px] opacity-60 ml-1">(Admin only)</span>}
         </button>
       </div>
 
-      <div className="topbar-actions">
+      <div className="topbar-actions flex items-center gap-3">
         <button
           type="button"
           className="icon-button notification"
@@ -146,17 +167,41 @@ function Header({
           {unreadCount > 0 && <span />}
         </button>
 
-        <button type="button" className="desktop-report" onClick={onReport}>
-          <Plus size={16} /> Report issue
-        </button>
+        {mode === "citizen" && (
+          <button type="button" className="desktop-report" onClick={onReport}>
+            <Plus size={16} /> Report issue
+          </button>
+        )}
 
-        <div className="avatar" title="Signed in as Community Member">
-          CM
+        <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+          <div className="text-right hidden sm:block">
+            <div className="text-xs font-bold text-slate-800 leading-none flex items-center justify-end gap-1.5">
+              {user?.name || user?.email || "User"}
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-semibold ${isAdmin ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                {isAdmin ? "Admin" : "Citizen"}
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-500">{user?.email}</div>
+          </div>
+
+          <div className="avatar" title={`Signed in as ${user?.email || 'User'}`}>
+            {userInitials}
+          </div>
+
+          <button
+            type="button"
+            onClick={onLogout}
+            title="Sign Out"
+            className="p-2 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors ml-1 cursor-pointer"
+          >
+            <LogOut size={17} />
+          </button>
         </div>
       </div>
     </header>
   );
 }
+
 
 /* =========================================================================
    REPORT ISSUE MODAL (5 STEPS)
@@ -1817,9 +1862,50 @@ function AdminView() {
    APP ROOT HOME
    ========================================================================= */
 export default function Home() {
+  const [, setLocation] = useLocation();
+  const utils = trpc.useUtils();
+  const userQuery = trpc.auth.me.useQuery(undefined, {
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const logoutMutation = trpc.auth.logout.useMutation({
+    onSuccess: async () => {
+      try {
+        sessionStorage.removeItem("manus-cookie");
+      } catch {}
+      utils.auth.me.setData(undefined, null);
+      await utils.auth.me.invalidate();
+      toast.success("Signed out successfully.");
+      setLocation("/login");
+    },
+  });
+
+  const user = userQuery.data;
   const [mode, setMode] = useState<Mode>("citizen");
   const [reporting, setReporting] = useState(false);
   const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    if (user?.role === "admin") {
+      setMode("admin");
+    } else if (user?.role === "user") {
+      setMode("citizen");
+    }
+  }, [user?.role]);
+
+  if (userQuery.isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
+        <div className="w-10 h-10 border-3 border-emerald-500/30 border-t-emerald-400 rounded-full animate-spin mb-4" />
+        <div className="text-sm font-semibold tracking-wide text-slate-300">Loading CityCare Hub…</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login />;
+  }
 
   return (
     <div className="app-shell">
@@ -1827,6 +1913,8 @@ export default function Home() {
         mode={mode}
         setMode={setMode}
         onReport={() => setReporting(true)}
+        user={user}
+        onLogout={() => logoutMutation.mutate()}
       />
 
       {reporting ? (
@@ -1849,3 +1937,4 @@ export default function Home() {
     </div>
   );
 }
+
