@@ -44,8 +44,12 @@ export default function Login() {
       setLocation("/");
     },
     onError: (err) => {
-      setErrorMessage(err.message || "Failed to sign in. Please verify credentials.");
-      toast.error(err.message || "Authentication failed");
+      let msg = err.message || "Failed to sign in. Please verify credentials.";
+      if (msg.includes("is not valid JSON") || msg.includes("Unexpected token") || msg.includes("A server e")) {
+        msg = "Server API endpoint is initializing. Please check that database/server is online and retry.";
+      }
+      setErrorMessage(msg);
+      toast.error(msg);
     },
   });
 

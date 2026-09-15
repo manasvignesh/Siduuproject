@@ -2,16 +2,23 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { InsertUser, users } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _client: ReturnType<typeof postgres> | null = null;
 
-// Lazily create the drizzle instance so local tooling can run without a DB.
+// Lazily create the drizzle instance so serverless / local tooling can run without failing
 export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+  const dbUrl = ENV.databaseUrl;
+  if (!_db && dbUrl) {
     try {
-      _client = postgres(process.env.DATABASE_URL, { max: 10, idle_timeout: 20 });
+      _client = postgres(dbUrl, {
+        max: 5,
+        idle_timeout: 15,
+        connect_timeout: 5,
+        prepare: false,
+        ssl: "require",
+      });
       _db = drizzle(_client);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
@@ -26,7 +33,13 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     throw new Error("User openId is required for upsert");
   }
 
-  const db = await getDb();
+  let db: ReturnType<typeof drizzle> | null = null;
+  try {
+    db = await getDb();
+  } catch (err) {
+    console.warn("[Database] getDb error:", err);
+  }
+
   if (!db) {
     console.warn("[Database] Cannot upsert user: database not available");
     return;
@@ -59,8 +72,8 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.role = user.role;
       updateSet.role = user.role;
     } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
+      values.role = "admin";
+      updateSet.role = "admin";
     }
 
     if (!values.lastSignedIn) {
@@ -71,24 +84,42 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onConflictDoUpdate({
-      target: users.openId,
-      set: updateSet,
-    });
+    await db
+      .insert(users)
+      .values(values)
+      .onConflictDoUpdate({
+        target: users.openId,
+        set: updateSet,
+      });
   } catch (error) {
-    console.error("[Database] Failed to upsert user:", error);
-    throw error;
+    console.warn("[Database] Failed to upsert user:", error);
   }
 }
 
 export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
+  let db: ReturnType<typeof drizzle> | null = null;
+  try {
+    db = await getDb();
+  } catch (err) {
+    console.warn("[Database] getDb error:", err);
+    return undefined;
+  }
+
   if (!db) {
     console.warn("[Database] Cannot get user: database not available");
     return undefined;
   }
 
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  try {
+    const result = await db
+      .select()
+      .from(users)
+      .where(eq(users.openId, openId))
+      .limit(1);
 
-  return result.length > 0 ? result[0] : undefined;
+    return result.length > 0 ? result[0] : undefined;
+  } catch (error) {
+    console.warn("[Database] getUserByOpenId error:", error);
+    return undefined;
+  }
 }
