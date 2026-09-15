@@ -1,103 +1,151 @@
 import {
   boolean,
-  double,
+  doublePrecision,
   index,
-  int,
-  mysqlEnum,
-  mysqlTable,
+  integer,
+  pgEnum,
+  pgTable,
+  serial,
   text,
   timestamp,
   uniqueIndex,
   varchar,
-} from "drizzle-orm/mysql-core";
+} from "drizzle-orm/pg-core";
 
-export const users = mysqlTable("users", {
-  id: int("id").autoincrement().primaryKey(),
+export const userRoleEnum = pgEnum("user_role", ["user", "admin"]);
+export const issueStatusEnum = pgEnum("issue_status", [
+  "submitted",
+  "acknowledged",
+  "in_progress",
+  "resolved",
+  "rejected",
+  "reopened",
+  "closed",
+]);
+export const issuePriorityEnum = pgEnum("issue_priority", [
+  "low",
+  "medium",
+  "high",
+  "urgent",
+]);
+export const photoKindEnum = pgEnum("photo_kind", ["before", "after"]);
+export const citizenVerificationEnum = pgEnum("citizen_verification", [
+  "pending",
+  "accepted",
+  "rejected",
+]);
+
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  role: userRoleEnum("role").default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
 });
 
-export const departments = mysqlTable("departments", {
-  id: int("id").autoincrement().primaryKey(),
+export const departments = pgTable("departments", {
+  id: serial("id").primaryKey(),
   name: varchar("name", { length: 160 }).notNull(),
   slug: varchar("slug", { length: 80 }).notNull().unique(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-export const issues = mysqlTable("issues", {
-  id: int("id").autoincrement().primaryKey(),
-  referenceCode: varchar("referenceCode", { length: 32 }).notNull().unique(),
-  reporterId: int("reporterId").references(() => users.id),
-  isAnonymous: boolean("isAnonymous").default(false).notNull(),
-  categorySlug: varchar("categorySlug", { length: 60 }).notNull(),
-  departmentId: int("departmentId").references(() => departments.id),
-  title: varchar("title", { length: 200 }).notNull(),
-  description: text("description").notNull(),
-  status: mysqlEnum("status", ["submitted", "acknowledged", "in_progress", "resolved", "rejected", "reopened", "closed"]).default("submitted").notNull(),
-  priority: mysqlEnum("priority", ["low", "medium", "high", "urgent"]).default("medium").notNull(),
-  latitude: double("latitude").notNull(),
-  longitude: double("longitude").notNull(),
-  address: text("address"),
-  upvoteCount: int("upvoteCount").default(0).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-  resolvedAt: timestamp("resolvedAt"),
-  slaDeadline: timestamp("slaDeadline"),
-  closedAt: timestamp("closedAt"),
-  citizenVerification: mysqlEnum("citizenVerification", ["pending", "accepted", "rejected"]).default("pending").notNull(),
-  verificationNote: text("verificationNote"),
-}, (table) => ({
-  geoIndex: index("issues_geo_idx").on(table.latitude, table.longitude),
-  statusIndex: index("issues_status_idx").on(table.status),
-  categoryIndex: index("issues_category_idx").on(table.categorySlug),
-}));
+export const issues = pgTable(
+  "issues",
+  {
+    id: serial("id").primaryKey(),
+    referenceCode: varchar("referenceCode", { length: 32 }).notNull().unique(),
+    reporterId: integer("reporterId").references(() => users.id),
+    isAnonymous: boolean("isAnonymous").default(false).notNull(),
+    categorySlug: varchar("categorySlug", { length: 60 }).notNull(),
+    departmentId: integer("departmentId").references(() => departments.id),
+    title: varchar("title", { length: 200 }).notNull(),
+    description: text("description").notNull(),
+    status: issueStatusEnum("status").default("submitted").notNull(),
+    priority: issuePriorityEnum("priority").default("medium").notNull(),
+    latitude: doublePrecision("latitude").notNull(),
+    longitude: doublePrecision("longitude").notNull(),
+    address: text("address"),
+    upvoteCount: integer("upvoteCount").default(0).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+    resolvedAt: timestamp("resolvedAt"),
+    slaDeadline: timestamp("slaDeadline"),
+    closedAt: timestamp("closedAt"),
+    citizenVerification: citizenVerificationEnum("citizenVerification")
+      .default("pending")
+      .notNull(),
+    verificationNote: text("verificationNote"),
+  },
+  (table) => [
+    index("issues_geo_idx").on(table.latitude, table.longitude),
+    index("issues_status_idx").on(table.status),
+    index("issues_category_idx").on(table.categorySlug),
+  ]
+);
 
-export const issuePhotos = mysqlTable("issue_photos", {
-  id: int("id").autoincrement().primaryKey(),
-  issueId: int("issueId").notNull().references(() => issues.id),
+export const issuePhotos = pgTable("issue_photos", {
+  id: serial("id").primaryKey(),
+  issueId: integer("issueId")
+    .notNull()
+    .references(() => issues.id),
   url: text("url").notNull(),
-  kind: mysqlEnum("kind", ["before", "after"]).default("before").notNull(),
+  kind: photoKindEnum("kind").default("before").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-export const issueStatusHistory = mysqlTable("issue_status_history", {
-  id: int("id").autoincrement().primaryKey(),
-  issueId: int("issueId").notNull().references(() => issues.id),
+export const issueStatusHistory = pgTable("issue_status_history", {
+  id: serial("id").primaryKey(),
+  issueId: integer("issueId")
+    .notNull()
+    .references(() => issues.id),
   fromStatus: varchar("fromStatus", { length: 40 }),
   toStatus: varchar("toStatus", { length: 40 }).notNull(),
-  changedById: int("changedById").references(() => users.id),
+  changedById: integer("changedById").references(() => users.id),
   note: text("note"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-export const issueUpvotes = mysqlTable("issue_upvotes", {
-  id: int("id").autoincrement().primaryKey(),
-  issueId: int("issueId").notNull().references(() => issues.id),
-  userId: int("userId").notNull().references(() => users.id),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({
-  issueUserUnique: uniqueIndex("issue_user_unique").on(table.issueId, table.userId),
-}));
+export const issueUpvotes = pgTable(
+  "issue_upvotes",
+  {
+    id: serial("id").primaryKey(),
+    issueId: integer("issueId")
+      .notNull()
+      .references(() => issues.id),
+    userId: integer("userId")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("issue_user_unique").on(table.issueId, table.userId),
+  ]
+);
 
-export const issueComments = mysqlTable("issue_comments", {
-  id: int("id").autoincrement().primaryKey(),
-  issueId: int("issueId").notNull().references(() => issues.id),
-  authorId: int("authorId").notNull().references(() => users.id),
+export const issueComments = pgTable("issue_comments", {
+  id: serial("id").primaryKey(),
+  issueId: integer("issueId")
+    .notNull()
+    .references(() => issues.id),
+  authorId: integer("authorId")
+    .notNull()
+    .references(() => users.id),
   body: text("body").notNull(),
   isInternal: boolean("isInternal").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
-export const notifications = mysqlTable("notifications", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull().references(() => users.id),
-  issueId: int("issueId").references(() => issues.id),
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  userId: integer("userId")
+    .notNull()
+    .references(() => users.id),
+  issueId: integer("issueId").references(() => issues.id),
   title: text("title").notNull(),
   body: text("body").notNull(),
   read: boolean("read").default(false).notNull(),

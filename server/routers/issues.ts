@@ -118,8 +118,12 @@ export const issuesRouter = router({
       const delta = input.radiusKm / 111;
       filters.push(gte(issues.latitude, input.lat - delta), lte(issues.latitude, input.lat + delta), gte(issues.longitude, input.lng - delta), lte(issues.longitude, input.lng + delta));
     }
+    const orderBy = input.sort === "most_upvoted"
+      ? desc(issues.upvoteCount)
+      : input.sort === "priority"
+      ? desc(sql`CASE WHEN ${issues.priority} = 'urgent' THEN 4 WHEN ${issues.priority} = 'high' THEN 3 WHEN ${issues.priority} = 'medium' THEN 2 ELSE 1 END`)
+      : desc(issues.createdAt);
     const where = filters.length ? and(...filters) : undefined;
-    const orderBy = input.sort === "most_upvoted" ? desc(issues.upvoteCount) : input.sort === "priority" ? desc(sql`FIELD(${issues.priority}, 'urgent', 'high', 'medium', 'low')`) : desc(issues.createdAt);
     const [items, totalRows] = await Promise.all([
       db.select().from(issues).where(where).orderBy(orderBy).limit(input.limit).offset(input.offset),
       db.select({ value: count() }).from(issues).where(where),
@@ -186,7 +190,20 @@ export const issuesRouter = router({
     const address = input.address ?? await bestEffortAddress(input.lat, input.lng);
     const department = (await db.select().from(departments).where(eq(departments.slug, departmentFor(input.categorySlug))).limit(1))[0];
     const slaHours = input.priority === "urgent" ? 24 : input.priority === "high" ? 72 : input.priority === "medium" ? 120 : 168;
-    const inserted = await db.insert(issues).values({ referenceCode: "PENDING", reporterId: ctx.user.id, isAnonymous: input.isAnonymous, categorySlug: input.categorySlug, departmentId: department?.id ?? null, title: input.title, description: input.description, priority: input.priority, latitude: input.lat, longitude: input.lng, address, slaDeadline: new Date(Date.now() + slaHours * 60 * 60 * 1000) }).$returningId();
+    const inserted = await db.insert(issues).values({
+      referenceCode: "PENDING",
+      reporterId: ctx.user.id,
+      isAnonymous: input.isAnonymous,
+      categorySlug: input.categorySlug,
+      departmentId: department?.id ?? null,
+      title: input.title,
+      description: input.description,
+      priority: input.priority,
+      latitude: input.lat,
+      longitude: input.lng,
+      address,
+      slaDeadline: new Date(Date.now() + slaHours * 60 * 60 * 1000),
+    }).returning({ id: issues.id });
     const issueId = inserted[0]?.id;
     if (!issueId) throw new Error("Issue creation failed");
     const code = referenceCode(new Date().getFullYear(), issueId);
@@ -265,8 +282,8 @@ export const issuesRouter = router({
       });
       return { id: Date.now() };
     }
-    const result = await db.insert(issueComments).values({ issueId: input.issueId, authorId: ctx.user.id, body: input.body, isInternal: ctx.user.role === "admin" ? input.isInternal : false });
-    return { id: Number(result[0]?.insertId ?? 0) };
+    const result = await db.insert(issueComments).values({ issueId: input.issueId, authorId: ctx.user.id, body: input.body, isInternal: ctx.user.role === "admin" ? input.isInternal : false }).returning({ id: issueComments.id });
+    return { id: Number(result[0]?.id ?? 0) };
   }),
 
   updateStatus: adminProcedure.input(z.object({ issueId: z.number().int().positive(), status: issueStatus, note: z.string().trim().max(2000).optional(), departmentId: z.number().int().positive().optional(), afterPhotoUrl: z.string().optional() })).mutation(async ({ input, ctx }) => {

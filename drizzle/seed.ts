@@ -17,15 +17,17 @@ async function seed() {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_URL is not configured");
   const departmentIds = new Map<string, number>();
+
   for (const department of defaultDepartments) {
     const existing = await db.select().from(departments).where(eq(departments.slug, department.slug)).limit(1);
     if (existing[0]) {
       departmentIds.set(department.slug, existing[0].id);
       continue;
     }
-    const inserted = await db.insert(departments).values(department).$returningId();
+    const inserted = await db.insert(departments).values(department).returning({ id: departments.id });
     if (inserted[0]?.id) departmentIds.set(department.slug, inserted[0].id);
   }
+
   for (const sample of samples) {
     const existing = await db.select({ id: issues.id }).from(issues).where(eq(issues.referenceCode, sample.code)).limit(1);
     if (existing[0]) continue;
@@ -44,10 +46,23 @@ async function seed() {
       address: sample.address,
       upvoteCount: sample.upvoteCount,
       resolvedAt: sample.status === "resolved" ? new Date() : null,
-    }).$returningId();
-    if (inserted[0]?.id) await db.insert(issueStatusHistory).values({ issueId: inserted[0].id, fromStatus: null, toStatus: sample.status, note: "Seeded CityCare demo record" });
+    }).returning({ id: issues.id });
+
+    if (inserted[0]?.id) {
+      await db.insert(issueStatusHistory).values({
+        issueId: inserted[0].id,
+        fromStatus: null,
+        toStatus: sample.status,
+        note: "Seeded CityCare demo record",
+      });
+    }
   }
-  console.log(`Seeded ${defaultDepartments.length} departments and ${samples.length} sample issues.`);
+
+  console.log(`Seeded ${defaultDepartments.length} departments and ${samples.length} sample issues to Supabase.`);
+  process.exit(0);
 }
 
-seed().catch((error) => { console.error(error); process.exitCode = 1; });
+seed().catch((error) => {
+  console.error("Seed error:", error);
+  process.exit(1);
+});
