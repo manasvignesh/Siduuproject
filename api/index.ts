@@ -8,7 +8,7 @@ import { createContext } from "../server/_core/context";
 
 const app = express();
 
-// Enable CORS
+// Enable CORS for all cross-origin or local requests
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.header("Access-Control-Allow-Credentials", "true");
@@ -30,17 +30,25 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 registerStorageProxy(app);
 registerOAuthRoutes(app);
 
-const trpcMiddleware = createExpressMiddleware({
-  router: appRouter,
-  createContext,
-  onError({ error, path }) {
-    console.error(`[tRPC Error on ${path}]:`, error);
-  },
+// Normalize incoming Vercel URLs
+app.use((req, _res, next) => {
+  if (req.url.startsWith("/trpc")) {
+    req.url = `/api${req.url}`;
+  }
+  next();
 });
 
-// Mount on all possible route prefixes for Vercel Serverless
-app.use("/api/trpc", trpcMiddleware);
-app.use("/trpc", trpcMiddleware);
+// Mount tRPC at /api/trpc
+app.use(
+  "/api/trpc",
+  createExpressMiddleware({
+    router: appRouter,
+    createContext,
+    onError({ error, path }) {
+      console.error(`[tRPC Serverless Error on path '${path}']:`, error);
+    },
+  })
+);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
