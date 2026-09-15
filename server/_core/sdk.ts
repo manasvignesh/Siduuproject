@@ -120,27 +120,21 @@ class SDKServer {
     }
 
     const signedInAt = new Date();
-    let user = await db.getUserByOpenId(session.openId);
+    let user: User | undefined = undefined;
 
-    if (!user) {
-      // Upsert in database if DB is available
-      try {
-        await db.upsertUser({
-          openId: session.openId,
-          name: session.name || null,
-          email: session.email ?? null,
-          loginMethod: "local",
-          role: session.role || "user",
-          lastSignedIn: signedInAt,
-        });
-        user = await db.getUserByOpenId(session.openId);
-      } catch (e) {
-        console.warn("[Auth] Failed to upsert user in DB:", e);
-      }
+    try {
+      user = await Promise.race([
+        db.getUserByOpenId(session.openId),
+        new Promise<undefined>((_, reject) =>
+          setTimeout(() => reject(new Error("DB Timeout")), 1500)
+        ),
+      ]);
+    } catch {
+      user = undefined;
     }
 
     if (!user) {
-      // Return structured fallback user from session payload
+      // Return structured fallback user from verified session payload
       return {
         id: session.openId === "admin-01" ? 1 : 2,
         openId: session.openId,

@@ -54,16 +54,21 @@ export const appRouter = router({
           name = email.split("@")[0].replace(/[._-]/g, " ");
         }
 
-        // Upsert user in Postgres DB
+        // Upsert user in Postgres DB safely with timeout guard
         try {
-          await upsertUser({
-            openId,
-            name,
-            email,
-            role,
-            loginMethod: "local",
-            lastSignedIn: new Date(),
-          });
+          await Promise.race([
+            upsertUser({
+              openId,
+              name,
+              email,
+              role,
+              loginMethod: "local",
+              lastSignedIn: new Date(),
+            }),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error("DB upsert timeout")), 1500)
+            ),
+          ]);
         } catch (error) {
           console.warn("[Auth Login] Database upsert warning:", error);
         }
