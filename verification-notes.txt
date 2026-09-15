@@ -1,0 +1,6 @@
+CityCare live verification (2026-09-15):
+- Preview loaded successfully at the managed WebDev URL.
+- Home screen renders with citizen dashboard and live tRPC-backed nearby issue count of 6, matching seeded database records.
+- Browser console had no runtime output/errors.
+- Earlier interaction verification confirmed report flow, duplicate detection modal, and operations dashboard render.
+- TypeScript check, Vitest suite (5 tests), production build, migration generation, migration application, and seed script completed successfully.
